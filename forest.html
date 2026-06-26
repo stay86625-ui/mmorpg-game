@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>魔法世界 — Enchanted World</title>
+<style>
+/* ── Base ─────────────────────────────────────────────────────────── */
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;}
+
+/* ── In-game HUD ──────────────────────────────────────────────────── */
+#hud{
+  position:fixed;top:10px;left:14px;z-index:50;
+  color:rgba(235,210,140,.92);
+  font:13px/2 'Segoe UI','Microsoft JhengHei',sans-serif;
+  pointer-events:none;text-shadow:0 1px 4px #000;
+}
+#hud small{display:block;font-size:10px;opacity:.40;line-height:1.6;}
+
+/* ── HP / MP 條 ────────────────────────────────────────────────────── */
+#stat-bars{
+  position:fixed;bottom:76px;left:14px;z-index:50;
+  display:none;flex-direction:column;gap:5px;pointer-events:none;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+.bar-row{display:flex;align-items:center;gap:7px;}
+.bar-lbl{color:rgba(180,160,120,.72);font-size:11px;width:22px;text-align:right;}
+.bar-bg{
+  width:145px;height:9px;
+  background:rgba(0,0,0,.55);border:1px solid rgba(55,75,110,.45);
+  border-radius:2px;overflow:hidden;
+}
+.bar-fill{height:100%;border-radius:2px;transition:width .15s ease;}
+#hp-fill{background:linear-gradient(90deg,#8B1010,#EE2222);}
+#mp-fill{background:linear-gradient(90deg,#0F2AAA,#1E55EE);}
+.bar-txt{color:rgba(155,140,105,.65);font-size:10px;min-width:60px;}
+
+/* ── 技能欄 ────────────────────────────────────────────────────────── */
+#skill-bar{
+  position:fixed;bottom:14px;left:50%;transform:translateX(-50%);
+  z-index:50;display:none;flex-direction:row;gap:10px;pointer-events:none;
+}
+.sk-slot{
+  width:64px;text-align:center;
+  background:rgba(0,0,0,.68);border:1px solid rgba(70,110,170,.38);
+  border-radius:4px;padding:6px 4px 5px;position:relative;overflow:hidden;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  color:rgba(230,205,135,.88);transition:opacity .2s;
+}
+.sk-key{font-size:18px;font-weight:bold;color:#D4A017;line-height:1.1;}
+.sk-name{font-size:10px;color:rgba(195,175,120,.82);margin:2px 0 1px;white-space:nowrap;overflow:hidden;}
+.sk-mp{font-size:10px;color:#4477DD;}
+.sk-cd-bar{height:3px;background:rgba(255,255,255,.10);border-radius:2px;margin-top:5px;overflow:hidden;}
+.sk-cd-fill{
+  height:100%;
+  background:linear-gradient(90deg,#3355AA,#6688CC);
+  width:0%;transition:width .12s linear;
+}
+
+/* ── EXP 條 ─────────────────────────────────────────────────────────── */
+#exp-area{
+  position:fixed;bottom:0;left:0;width:100%;height:4px;
+  z-index:51;display:none;align-items:center;pointer-events:none;
+}
+#exp-bg{flex:1;height:4px;background:rgba(0,0,0,.35);}
+#exp-fill{height:100%;background:linear-gradient(90deg,#4D11AA,#8833EE);width:0%;transition:width .35s ease;}
+
+#lv-txt{
+  position:fixed;bottom:6px;left:14px;z-index:52;
+  color:rgba(195,175,120,.75);font-size:11px;
+  font-family:'Segoe UI',sans-serif;pointer-events:none;display:none;
+}
+#exp-txt{
+  position:fixed;bottom:6px;right:172px;z-index:52;
+  color:rgba(130,110,90,.60);font-size:10px;
+  font-family:'Segoe UI',sans-serif;pointer-events:none;
+}
+
+/* ── 升級提示 ──────────────────────────────────────────────────────── */
+#lvup-notice{
+  position:fixed;top:50%;left:50%;z-index:60;
+  transform:translate(-50%,-50%);display:none;pointer-events:none;
+  color:#FFD700;font-size:30px;font-weight:bold;letter-spacing:5px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  text-shadow:0 0 24px #FFD700BB,0 0 50px #FFD70066;
+  animation:lvupAnim 3.6s ease-out forwards;
+}
+@keyframes lvupAnim{
+  0%  {opacity:0;transform:translate(-50%,-50%) scale(.85);}
+  12% {opacity:1;transform:translate(-50%,-50%) scale(1.08);}
+  65% {opacity:1;transform:translate(-50%,-55%);}
+  100%{opacity:0;transform:translate(-50%,-72%);}
+}
+
+/* ── 金幣顯示 ────────────────────────────────────────────────────── */
+#hud-gold{
+  position:fixed;top:10px;right:180px;z-index:50;display:none;
+  color:#FFD700;font:13px/1 'Segoe UI',sans-serif;pointer-events:none;
+  text-shadow:0 1px 4px #000;
+}
+
+/* ── 互動提示（NPC / 採集）──────────────────────────────────────── */
+#interact-hint,#gather-hint{
+  position:fixed;bottom:90px;left:50%;transform:translateX(-50%);
+  z-index:55;display:none;pointer-events:none;
+  background:rgba(0,0,0,.72);border:1px solid rgba(80,120,180,.4);
+  border-radius:4px;padding:6px 18px;
+  color:rgba(210,195,140,.88);font-size:12px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+
+/* ── 拾取通知 ─────────────────────────────────────────────────────── */
+#loot-notifs{
+  position:fixed;top:55px;right:14px;z-index:55;pointer-events:none;
+  display:flex;flex-direction:column;gap:4px;align-items:flex-end;
+}
+.loot-notif{
+  background:rgba(0,0,0,.72);border:1px solid rgba(60,100,160,.3);
+  border-radius:3px;padding:4px 12px;font-size:12px;
+  color:rgba(200,185,130,.9);
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  animation:lootFade 2.6s ease-out forwards;
+}
+@keyframes lootFade{0%{opacity:0;transform:translateX(14px);}10%{opacity:1;transform:translateX(0);}80%{opacity:1;}100%{opacity:0;}}
+
+/* ── 任務通知 ─────────────────────────────────────────────────────── */
+#quest-notif{
+  position:fixed;top:50px;left:50%;transform:translateX(-50%);
+  z-index:56;display:none;pointer-events:none;
+  background:rgba(0,0,0,.82);border:1px solid rgba(100,200,100,.35);
+  border-radius:4px;padding:8px 24px;
+  color:#88EE88;font-size:13px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  text-shadow:0 0 10px #44AA4488;
+}
+#boss-notif{
+  position:fixed;top:58px;left:50%;transform:translateX(-50%);
+  z-index:57;display:none;pointer-events:none;
+  background:rgba(0,0,0,.85);border:1px solid rgba(220,80,20,.5);
+  border-radius:4px;padding:9px 28px;
+  color:#FF8844;font-size:14px;font-weight:bold;letter-spacing:1px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  text-shadow:0 0 14px #FF440088;
+}
+
+/* ── Boss HP 條（頂部）──────────────────────────────────────────── */
+#boss-bar{
+  position:fixed;top:0;left:50%;transform:translateX(-50%);
+  z-index:58;display:none;flex-direction:column;align-items:center;
+  pointer-events:none;padding:4px 0;
+}
+#boss-bar-name{
+  color:#FF8844;font-size:12px;letter-spacing:2px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  text-shadow:0 0 10px #FF440066;margin-bottom:3px;
+}
+#boss-bar-bg{
+  width:340px;height:8px;background:rgba(0,0,0,.65);
+  border:1px solid rgba(220,80,20,.4);border-radius:2px;overflow:hidden;
+}
+#boss-bar-fill{
+  height:100%;width:100%;
+  background:linear-gradient(90deg,#991100,#FF2200);
+  transition:width .25s ease;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SHARED UI PANEL STYLES
+   ══════════════════════════════════════════════════════════════════ */
+.ui-overlay{
+  position:fixed;inset:0;z-index:300;
+  background:rgba(0,0,0,.55);
+  display:none;align-items:center;justify-content:center;
+}
+.ui-overlay.open{display:flex;}
+.ui-panel{
+  background:rgba(6,10,20,.97);
+  border:1px solid rgba(80,120,180,.28);border-radius:6px;
+  padding:0;min-width:360px;max-width:92vw;max-height:85vh;
+  overflow:hidden;display:flex;flex-direction:column;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  box-shadow:0 8px 40px rgba(0,0,0,.8);
+}
+.ui-panel-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:13px 18px 10px;border-bottom:1px solid rgba(60,100,160,.2);
+  flex-shrink:0;
+}
+.ui-panel-title{
+  color:#D4A017;font-size:16px;letter-spacing:3px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+.ui-close{
+  background:none;border:none;color:rgba(160,140,100,.5);
+  font-size:18px;cursor:pointer;padding:0 4px;line-height:1;
+  transition:color .15s;
+}
+.ui-close:hover{color:#D4A017;}
+.ui-body{
+  overflow-y:auto;padding:14px 18px;flex:1;
+  scrollbar-width:thin;scrollbar-color:rgba(80,120,180,.3) transparent;
+}
+
+/* ── 物品格子（背包）──────────────────────────────────────────────── */
+#inv-panel{min-width:640px;}
+.inv-layout{display:flex;gap:16px;}
+.inv-equip{display:flex;flex-direction:column;gap:5px;min-width:160px;}
+.eq-slot{
+  display:flex;align-items:center;gap:10px;
+  background:rgba(255,255,255,.03);border:1px solid rgba(50,80,130,.3);
+  border-radius:4px;padding:6px 10px;cursor:pointer;transition:border-color .15s;
+}
+.eq-slot:hover{border-color:#4488BB;}
+.eq-lbl{color:rgba(120,140,180,.6);font-size:11px;min-width:32px;}
+.eq-icon{font-size:13px;color:rgba(210,185,140,.85);flex:1;text-align:right;}
+.inv-bag{flex:1;}
+.inv-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;}
+.inv-slot{
+  aspect-ratio:1;background:rgba(255,255,255,.04);
+  border:1px solid rgba(50,80,130,.25);border-radius:3px;
+  position:relative;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:border-color .12s,background .12s;overflow:hidden;
+}
+.inv-slot:hover{background:rgba(80,120,200,.12);border-color:rgba(80,140,220,.5);}
+.inv-icon{font-size:18px;line-height:1;}
+.inv-qty{
+  position:absolute;bottom:1px;right:3px;
+  font-size:10px;color:rgba(200,185,140,.8);line-height:1;
+}
+/* 屬性面板 */
+.inv-stats{margin-top:12px;padding-top:10px;border-top:1px solid rgba(50,80,130,.2);}
+.stat-row{display:flex;justify-content:space-between;padding:2px 0;font-size:12px;color:rgba(160,150,120,.75);}
+.stat-k{color:rgba(100,140,200,.6);}
+.stat-v em{color:#88BB88;font-style:normal;}
+#inv-gold{padding-top:8px;font-size:13px;color:#FFD700;text-align:right;padding-right:2px;}
+#inv-stats{margin-top:10px;}
+
+/* ── Tooltip ──────────────────────────────────────────────────────── */
+#item-tooltip{
+  position:fixed;z-index:500;display:none;
+  background:rgba(4,8,18,.97);border:1px solid rgba(70,110,170,.45);
+  border-radius:5px;padding:10px 14px;pointer-events:none;
+  font-size:12px;color:rgba(200,185,135,.9);line-height:1.7;max-width:220px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  box-shadow:0 4px 20px rgba(0,0,0,.8);
+}
+
+/* ── Shop ─────────────────────────────────────────────────────────── */
+#shop-panel{min-width:400px;}
+.shop-tabs{display:flex;gap:0;border-bottom:1px solid rgba(50,80,130,.3);}
+.shop-tab{
+  padding:8px 22px;background:none;border:none;
+  color:rgba(130,150,180,.55);font-size:13px;cursor:pointer;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  border-bottom:2px solid transparent;transition:color .15s,border-color .15s;
+}
+.shop-tab.active{color:#D4A017;border-color:#D4A017;}
+.shop-tab:hover{color:rgba(200,175,110,.8);}
+.shop-gold{padding:8px 18px;color:#FFD700;font-size:12px;border-bottom:1px solid rgba(50,80,130,.2);}
+.shop-row{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 0;border-bottom:1px solid rgba(30,50,90,.35);
+}
+.shop-icon{font-size:18px;width:24px;text-align:center;}
+.shop-name{flex:1;font-size:13px;color:rgba(200,185,135,.85);}
+.shop-price{color:#FFD700;font-size:12px;white-space:nowrap;}
+.shop-btn{
+  background:rgba(100,160,80,.25);border:1px solid rgba(80,180,60,.3);
+  color:#88DD66;font-size:11px;padding:4px 10px;cursor:pointer;
+  border-radius:3px;transition:background .12s;
+  font-family:'Segoe UI',sans-serif;
+}
+.shop-btn:hover:not(:disabled){background:rgba(100,180,80,.45);}
+.shop-btn:disabled{opacity:.35;cursor:default;}
+.shop-btn-sell{background:rgba(180,100,30,.25);border-color:rgba(200,120,40,.3);color:#DDAA44;}
+.shop-btn-sell:hover{background:rgba(200,120,40,.45);}
+.shop-msg{min-height:22px;font-size:12px;color:#88EE88;padding:6px 0;}
+
+/* ── Quest ────────────────────────────────────────────────────────── */
+#quest-panel{min-width:400px;}
+.quest-item{padding:12px 0;border-bottom:1px solid rgba(30,50,90,.4);}
+.quest-title{color:#D4A017;font-size:14px;font-weight:bold;margin-bottom:5px;}
+.quest-desc{color:rgba(170,155,120,.7);font-size:12px;line-height:1.6;margin-bottom:6px;}
+.quest-prog-row{font-size:12px;color:rgba(160,150,120,.8);margin-bottom:4px;}
+.quest-bar-bg{height:4px;background:rgba(0,0,0,.45);border-radius:2px;overflow:hidden;margin-bottom:5px;}
+.quest-bar-fill{height:100%;background:linear-gradient(90deg,#335522,#44AA44);transition:width .4s ease;}
+.quest-reward{font-size:13px;color:#CCDD88;font-weight:600;}
+
+/* ── Craft ────────────────────────────────────────────────────────── */
+#craft-panel{min-width:400px;}
+.craft-item{padding:10px 0;border-bottom:1px solid rgba(30,50,90,.35);}
+.craft-result{color:rgba(210,195,145,.9);font-size:13px;margin-bottom:4px;}
+.craft-mats{font-size:12px;color:rgba(150,140,110,.7);margin-bottom:6px;line-height:1.7;}
+.craft-btn{
+  background:rgba(80,60,20,.4);border:1px solid rgba(180,140,30,.35);
+  color:#D4A017;font-size:12px;padding:5px 14px;cursor:pointer;
+  border-radius:3px;transition:background .12s;
+  font-family:'Segoe UI',sans-serif;
+}
+.craft-btn:hover:not(:disabled){background:rgba(120,90,30,.55);}
+.craft-btn:disabled{opacity:.35;cursor:default;color:rgba(120,110,80,.5);}
+.craft-msg{min-height:22px;font-size:12px;color:#88EE88;padding:6px 0;}
+
+/* ── Skill Tree ───────────────────────────────────────────────────── */
+#skill-panel{min-width:380px;}
+#skill-pts{
+  padding:8px 18px;font-size:12px;color:#FFD700;
+  border-bottom:1px solid rgba(50,80,130,.2);
+}
+.sk-tree-item{
+  padding:10px 0;border-bottom:1px solid rgba(30,50,90,.35);
+  transition:background .12s;
+}
+.sk-tree-item.unlocked .sk-tree-name{color:#88DD88;}
+.sk-tree-name{color:rgba(210,195,145,.9);font-size:13px;font-weight:bold;margin-bottom:3px;}
+.sk-tree-desc{font-size:12px;color:rgba(150,140,110,.7);margin-bottom:4px;}
+.sk-tree-cost{font-size:11px;color:rgba(100,140,180,.6);margin-bottom:5px;}
+.sk-tree-btn{
+  background:rgba(40,80,150,.3);border:1px solid rgba(60,120,200,.35);
+  color:#6699DD;font-size:12px;padding:5px 14px;cursor:pointer;
+  border-radius:3px;transition:background .12s;
+  font-family:'Segoe UI',sans-serif;
+}
+.sk-tree-btn:hover:not(:disabled){background:rgba(60,110,200,.5);color:#88BBFF;}
+.sk-tree-btn:disabled{opacity:.35;cursor:default;}
+
+/* ── NPC Dialog ───────────────────────────────────────────────────── */
+#dialog-box{
+  position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
+  z-index:310;display:none;flex-direction:column;
+  min-width:500px;max-width:680px;width:60vw;
+  background:rgba(4,8,18,.97);border:1px solid rgba(80,120,180,.35);
+  border-radius:6px;overflow:hidden;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+#dialog-name{
+  background:rgba(20,40,80,.6);padding:8px 18px;
+  color:#D4A017;font-size:14px;font-weight:bold;letter-spacing:2px;
+  border-bottom:1px solid rgba(60,100,160,.25);
+}
+#dialog-text{
+  padding:14px 18px;font-size:13px;color:rgba(200,185,140,.88);
+  line-height:1.8;min-height:60px;
+}
+#dialog-opts{
+  display:flex;flex-wrap:wrap;gap:8px;padding:10px 18px 14px;
+  border-top:1px solid rgba(40,70,120,.25);
+}
+.dlg-btn{
+  background:rgba(255,255,255,.06);border:1px solid rgba(80,120,180,.3);
+  color:rgba(170,160,130,.8);font-size:12px;padding:7px 16px;
+  cursor:pointer;border-radius:3px;transition:all .15s;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+.dlg-btn:hover{background:rgba(80,120,200,.2);border-color:#4488BB;color:#AACCEE;}
+
+/* ── 城鎮提示 ─────────────────────────────────────────────────────── */
+#town-hint{
+  position:fixed;bottom:90px;left:50%;transform:translateX(-50%);
+  z-index:55;display:none;pointer-events:none;
+  background:rgba(0,0,0,.72);border:1px solid rgba(80,200,80,.3);
+  border-radius:4px;padding:6px 18px;
+  color:rgba(140,230,140,.88);font-size:12px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+
+/* ── 區域 HUD ──────────────────────────────────────────────────────── */
+#area-hud{
+  position:fixed;top:10px;right:14px;z-index:50;
+  display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+  pointer-events:none;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+#area-name{font-size:11px;font-weight:bold;text-shadow:0 1px 4px #000;color:#88FF88;}
+#area-level{font-size:10px;color:rgba(160,150,120,.6);}
+#area-danger{font-size:10px;color:#FFAA22;}
+#hud-title{
+  font-size:12px;color:#FFD700;
+  text-shadow:0 0 8px #FFD70088;margin-top:2px;
+}
+
+/* ── 區域切換通知（右上角，不遮擋戰鬥視野） ─────────────────────── */
+#area-notif{
+  position:fixed;top:120px;right:14px;left:auto;
+  transform:none;
+  z-index:56;display:none;flex-direction:column;align-items:flex-end;
+  pointer-events:none;gap:2px;
+  background:rgba(0,0,0,.70);border:1px solid rgba(80,120,180,.25);
+  border-radius:5px;padding:7px 14px;min-width:0;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  animation:areaSlideIn .25s ease-out;
+}
+@keyframes areaSlideIn{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
+
+/* ── 世界事件橫幅 ─────────────────────────────────────────────────── */
+#event-bar{
+  position:fixed;top:0;left:50%;transform:translateX(-50%);
+  z-index:58;display:none;align-items:center;gap:14px;
+  background:rgba(0,0,0,.82);border-bottom:1px solid rgba(200,100,20,.3);
+  padding:4px 24px;pointer-events:none;
+  font-size:12px;font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+
+/* ── 成就解鎖通知 ─────────────────────────────────────────────────── */
+#ach-notif{
+  position:fixed;bottom:100px;left:50%;transform:translateX(-50%);
+  z-index:57;display:none;pointer-events:none;
+  background:rgba(0,0,0,.88);border:1px solid rgba(255,215,0,.4);
+  border-radius:5px;padding:10px 26px;
+  color:#FFD700;font-size:13px;font-weight:bold;letter-spacing:1px;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  text-shadow:0 0 14px #FFD70055;
+}
+
+/* ── 倉庫面板 ─────────────────────────────────────────────────────── */
+#warehouse-panel{min-width:560px;}
+#warehouse-grid{
+  display:grid;grid-template-columns:repeat(10,1fr);gap:3px;
+  margin-top:6px;
+}
+
+/* ── 圖鑑面板 ─────────────────────────────────────────────────────── */
+#bestiary-panel{min-width:420px;}
+.bst-row{
+  display:flex;align-items:center;gap:10px;
+  padding:7px 0;border-bottom:1px solid rgba(30,50,90,.35);
+  font-size:12px;font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+.bst-name{flex:1;color:rgba(200,185,140,.85);}
+.bst-bio{color:rgba(100,140,180,.6);width:60px;text-align:center;}
+.bst-kills{color:rgba(120,170,120,.8);white-space:nowrap;}
+
+/* ── 成就面板 ─────────────────────────────────────────────────────── */
+#ach-panel{min-width:420px;}
+.ach-cat{
+  color:#4488BB;font-size:11px;letter-spacing:2px;
+  padding:10px 0 5px;border-bottom:1px solid rgba(30,50,90,.35);
+  margin-bottom:3px;
+}
+.ach-item{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:7px 0;border-bottom:1px solid rgba(20,35,65,.4);
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+.ach-item.ach-done .ach-name{color:rgba(210,195,145,.9);}
+.ach-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0;}
+.ach-name{font-size:13px;color:rgba(80,80,80,.6);font-weight:bold;}
+.ach-desc{font-size:11px;color:rgba(120,110,90,.5);line-height:1.5;}
+.ach-title-tag{font-size:11px;color:#D4A017;margin-top:2px;}
+.ach-check{color:#44DD44;font-size:14px;margin-left:auto;align-self:center;}
+
+/* ── 聲望面板 ─────────────────────────────────────────────────────── */
+#rep-panel{min-width:400px;}
+.rep-row{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 0;border-bottom:1px solid rgba(30,50,90,.35);
+}
+.rep-icon{font-size:20px;width:26px;text-align:center;flex-shrink:0;}
+.rep-info{flex:1;}
+.rep-name{font-size:13px;font-weight:bold;margin-bottom:2px;}
+.rep-tier{font-size:12px;margin-bottom:4px;}
+.rep-bar{height:4px;background:rgba(0,0,0,.4);border-radius:2px;overflow:hidden;}
+.rep-fill{height:100%;border-radius:2px;transition:width .4s ease;}
+
+/* ── Screen overlay ───────────────────────────────────────────────── */
+#screens{
+  position:fixed;inset:0;z-index:200;
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  user-select:none;transition:opacity .85s ease;
+}
+#screens.fade-out{opacity:0;pointer-events:none;}
+
+.g-screen{
+  position:absolute;inset:0;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+}
+.g-screen.active{display:flex;}
+
+/* ── Shared Buttons ───────────────────────────────────────────────── */
+.g-btn{
+  background:linear-gradient(155deg,#7A5810 0%,#D4A017 48%,#7A5810 100%);
+  color:#0a0510;border:none;padding:13px 48px;
+  font-size:15px;font-weight:bold;letter-spacing:3px;cursor:pointer;
+  border-radius:3px;box-shadow:0 0 20px #D4A01755;
+  transition:box-shadow .18s,transform .12s;margin:7px;
+  font-family:inherit;
+}
+.g-btn:hover{box-shadow:0 0 38px #D4A017BB;transform:scale(1.04);}
+.g-btn:active{transform:scale(.97);}
+.g-btn:disabled{opacity:.28;cursor:default;transform:none;box-shadow:none;}
+.g-btn-sm{
+  background:transparent;border:1px solid #2e3a55;color:#6688AA;
+  padding:8px 20px;font-size:13px;cursor:pointer;border-radius:3px;
+  transition:border-color .18s,color .18s;font-family:inherit;
+}
+.g-btn-sm:hover{border-color:#D4A017;color:#D4A017;}
+
+/* ══════════════════════════════════════════════════════════════════
+   TITLE SCREEN
+   ══════════════════════════════════════════════════════════════════ */
+#scr-title{
+  background:radial-gradient(ellipse at 50% 38%,#0e1b2e 0%,#020408 68%);
+}
+.ttl-wrap{text-align:center;}
+.ttl-main{
+  font-size:64px;color:#D4A017;margin:0;letter-spacing:10px;
+  animation:ttlGlow 3.5s ease-in-out infinite alternate;
+}
+@keyframes ttlGlow{
+  from{text-shadow:0 0 28px #D4A01766,0 0 60px #D4A01722;}
+  to  {text-shadow:0 0 58px #D4A017CC,0 0 110px #D4A01755;}
+}
+.ttl-sub{color:#4d5f88;letter-spacing:7px;font-size:12px;margin:10px 0 52px;}
+.ttl-ver{position:fixed;bottom:13px;right:17px;color:#1e2030;font-size:11px;}
+.ttl-hint{
+  color:#2e3f55;font-size:12px;margin-top:30px;letter-spacing:1px;
+  animation:blink 2.2s ease-in-out infinite;
+}
+@keyframes blink{0%,100%{opacity:.3;}50%{opacity:.9;}}
+
+/* ══════════════════════════════════════════════════════════════════
+   CHARACTER CREATION SCREEN
+   ══════════════════════════════════════════════════════════════════ */
+#scr-create{
+  background:rgba(2,4,10,.97);
+  padding:20px 0 28px;overflow-y:auto;justify-content:flex-start;
+}
+.cr-title{
+  color:#D4A017;font-size:20px;letter-spacing:6px;
+  margin:0 0 22px;text-align:center;width:100%;
+  text-shadow:0 0 18px #D4A01766;
+}
+
+/* Layout */
+.cr-layout{
+  display:flex;gap:30px;max-width:920px;width:100%;padding:0 22px;
+}
+
+/* ── Class list (left) ── */
+.cls-list{display:flex;flex-direction:column;gap:9px;width:188px;flex-shrink:0;}
+.cls-card{
+  background:rgba(255,255,255,.03);border:1px solid #1c2638;
+  border-radius:5px;padding:11px 13px;cursor:pointer;
+  transition:background .15s,border-color .15s;
+  display:flex;align-items:center;gap:12px;
+}
+.cls-card:hover{background:rgba(212,160,23,.09);border-color:#5c4410;}
+.cls-card.sel{background:rgba(212,160,23,.17);border-color:#C49A14;
+  box-shadow:0 0 12px #D4A01733;}
+.cls-icon{font-size:20px;width:26px;text-align:center;flex-shrink:0;line-height:1;}
+.cls-nm{color:#EDD88A;font-size:14px;font-weight:bold;line-height:1.2;}
+.cls-role{color:#4d6280;font-size:11px;margin-top:3px;}
+
+/* ── Right panel ── */
+.cr-right{flex:1;display:flex;flex-direction:column;align-items:center;gap:15px;min-width:0;}
+#cv-char{
+  image-rendering:pixelated;image-rendering:crisp-edges;
+  width:110px;height:150px;display:block;
+  background:rgba(255,255,255,.02);border:1px solid #1a2438;border-radius:6px;
+}
+.cls-detail-name{
+  color:#D4A017;font-size:17px;font-weight:bold;text-align:center;margin-bottom:7px;
+}
+.cls-detail-desc{
+  color:#8AABBF;font-size:13px;line-height:1.80;text-align:center;max-width:360px;
+}
+
+/* Stat bars */
+.stats-row{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;}
+.st{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:46px;}
+.st-lbl{color:#3d5266;font-size:10px;letter-spacing:1px;}
+.st-bar{width:46px;height:5px;background:#0c1020;border-radius:3px;overflow:hidden;}
+.st-fill{height:100%;border-radius:3px;transition:width .28s ease;}
+.st-atk{background:linear-gradient(90deg,#CC2200,#FF4422);}
+.st-def{background:linear-gradient(90deg,#1133BB,#2255EE);}
+.st-spd{background:linear-gradient(90deg,#118833,#22BB44);}
+.st-mag{background:linear-gradient(90deg,#6611BB,#9933EE);}
+
+/* Divider */
+.cr-div{width:100%;max-width:340px;height:1px;
+  background:linear-gradient(90deg,transparent,#1e2e48,transparent);margin:2px 0;}
+
+/* Name input */
+.nm-area{display:flex;flex-direction:column;gap:7px;width:100%;max-width:300px;}
+.nm-lbl{color:#445566;font-size:11px;letter-spacing:2px;}
+#inp-name{
+  background:rgba(255,255,255,.05);border:1px solid #243050;
+  color:#EDD88A;padding:10px 14px;font-size:16px;letter-spacing:2px;
+  border-radius:3px;outline:none;width:100%;font-family:inherit;
+}
+#inp-name:focus{border-color:#C49A14;box-shadow:0 0 12px #D4A01728;}
+#inp-name::placeholder{color:#263040;letter-spacing:1px;}
+
+/* Back button */
+.back-pos{position:fixed;top:16px;left:16px;}
+
+/* ── 新手教學面板 ── */
+#tutorial-box{
+  position:fixed;bottom:90px;right:18px;z-index:320;width:230px;
+  background:rgba(8,16,32,0.93);
+  border:1px solid rgba(80,130,220,0.35);border-radius:8px;
+  padding:13px 15px;color:rgba(220,200,155,0.92);
+  font-family:'Segoe UI','Microsoft JhengHei',sans-serif;
+  display:none;pointer-events:all;box-shadow:0 2px 18px rgba(0,0,0,.55);
+}
+#tut-header{display:flex;align-items:center;margin-bottom:10px;}
+#tut-step-num{font-size:10px;color:rgba(120,160,240,.7);letter-spacing:1px;}
+#tut-skip{margin-left:auto;background:none;border:1px solid rgba(180,140,80,.3);
+  color:rgba(180,140,80,.6);font-size:10px;padding:2px 8px;cursor:pointer;
+  border-radius:3px;font-family:inherit;}
+#tut-skip:hover{color:#FFD700;border-color:#FFD700;}
+#tut-icon-el{font-size:26px;text-align:center;margin-bottom:6px;}
+#tut-title-el{font-weight:bold;font-size:13px;color:#FFD700;margin-bottom:6px;text-align:center;}
+#tut-msg-el{font-size:11px;line-height:1.65;color:rgba(210,195,155,.85);
+  margin-bottom:12px;text-align:center;}
+#tut-msg-el b{color:#88DDFF;}
+#tut-next{width:100%;background:rgba(40,80,160,.55);border:1px solid rgba(80,130,220,.4);
+  color:rgba(200,220,255,.9);font-size:11px;padding:6px 0;cursor:pointer;
+  border-radius:4px;font-family:inherit;letter-spacing:1px;}
+#tut-next:hover{background:rgba(60,110,210,.7);color:#fff;}
+
+/* ── 任務委託面板 ── */
+#quest-offer-panel .ui-panel{min-width:420px;max-width:480px;}
+#qo-npc-name{color:#AAD0FF;font-size:11px;margin-left:auto;opacity:.8;}
+#qo-quest-title{font-size:16px;font-weight:bold;color:#FFD700;margin-bottom:10px;}
+#qo-quest-desc{color:rgba(200,185,150,.9);margin-bottom:12px;line-height:1.65;font-size:13px;}
+#qo-quest-target{color:#FF9944;margin-bottom:8px;font-size:13px;}
+#qo-quest-reward{
+  color:#FFD700;border-top:1px solid rgba(80,100,140,.3);
+  padding-top:10px;margin-top:10px;
+  font-size:16px;font-weight:700;
+  text-shadow:0 0 10px rgba(255,215,0,.5);
+}
+</style>
+</head>
+<body>
+<div id="hud">載入中…</div>
+
+<!-- ── HP / MP 條 ── -->
+<div id="stat-bars">
+  <div class="bar-row">
+    <span class="bar-lbl">HP</span>
+    <div class="bar-bg"><div class="bar-fill" id="hp-fill"></div></div>
+    <span class="bar-txt" id="hp-txt"></span>
+  </div>
+  <div class="bar-row">
+    <span class="bar-lbl">MP</span>
+    <div class="bar-bg"><div class="bar-fill" id="mp-fill"></div></div>
+    <span class="bar-txt" id="mp-txt"></span>
+  </div>
+</div>
+
+<!-- ── 技能欄 ── -->
+<div id="skill-bar">
+  <div class="sk-slot" id="sk-0">
+    <div class="sk-key">Q</div>
+    <div class="sk-name" id="sk-0-name">—</div>
+    <div class="sk-mp"   id="sk-0-mp"></div>
+    <div class="sk-cd-bar"><div class="sk-cd-fill" id="sk-0-cd"></div></div>
+  </div>
+  <div class="sk-slot" id="sk-1">
+    <div class="sk-key">E</div>
+    <div class="sk-name" id="sk-1-name">—</div>
+    <div class="sk-mp"   id="sk-1-mp"></div>
+    <div class="sk-cd-bar"><div class="sk-cd-fill" id="sk-1-cd"></div></div>
+  </div>
+</div>
+
+<!-- ── EXP 條 ── -->
+<span id="lv-txt"></span>
+<div id="exp-area">
+  <div id="exp-bg"><div id="exp-fill"></div></div>
+</div>
+<span id="exp-txt"></span>
+
+<!-- ── 升級提示 ── -->
+<div id="lvup-notice"></div>
+
+<!-- ── 輔助 HUD ── -->
+<div id="hud-gold" style="display:none">🪙 0</div>
+<div id="interact-hint"></div>
+<div id="gather-hint"></div>
+<div id="loot-notifs"></div>
+<div id="quest-notif"></div>
+<div id="boss-notif"></div>
+
+<!-- ── Boss HP 條 ── -->
+<div id="boss-bar">
+  <div id="boss-bar-name"></div>
+  <div id="boss-bar-bg"><div id="boss-bar-fill"></div></div>
+</div>
+
+<!-- ── 背包 + 裝備面板 ── -->
+<div class="ui-overlay" id="inv-panel">
+  <div class="ui-panel" style="min-width:640px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">🎒 背包與裝備</span>
+      <button class="ui-close" id="inv-close">✕</button>
+    </div>
+    <div class="ui-body">
+      <div class="inv-layout">
+        <div>
+          <div class="inv-equip" id="inv-equip"></div>
+          <div id="inv-stats"></div>
+          <div id="inv-gold">🪙 0</div>
+        </div>
+        <div class="inv-bag">
+          <div class="inv-grid" id="inv-grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 商店面板 ── -->
+<div class="ui-overlay" id="shop-panel">
+  <div class="ui-panel" style="min-width:420px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title" id="shop-title">🏪 商店</span>
+      <button class="ui-close" id="shop-close">✕</button>
+    </div>
+    <div class="shop-tabs">
+      <button class="shop-tab active" id="shop-tab-buy">購買</button>
+      <button class="shop-tab" id="shop-tab-sell">出售</button>
+    </div>
+    <div class="shop-gold" id="shop-gold">🪙 0</div>
+    <div class="ui-body">
+      <div id="shop-list"></div>
+      <div class="shop-msg" id="shop-msg"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 任務面板 ── -->
+<div class="ui-overlay" id="quest-panel">
+  <div class="ui-panel" style="min-width:420px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">📋 任務日誌</span>
+      <button class="ui-close" id="quest-close">✕</button>
+    </div>
+    <div class="ui-body">
+      <div id="quest-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 技能樹面板 ── -->
+<div class="ui-overlay" id="skill-panel">
+  <div class="ui-panel" style="min-width:400px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">🌟 技能樹</span>
+      <button class="ui-close" id="skill-close">✕</button>
+    </div>
+    <div id="skill-pts" style="padding:8px 18px;font-size:12px;color:#FFD700;border-bottom:1px solid rgba(50,80,130,.2)">可用技能點：0</div>
+    <div class="ui-body">
+      <div id="skill-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 製作面板 ── -->
+<div class="ui-overlay" id="craft-panel">
+  <div class="ui-panel" style="min-width:420px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">⚒ 製作工坊</span>
+      <button class="ui-close" id="craft-close">✕</button>
+    </div>
+    <div class="ui-body">
+      <div id="craft-list"></div>
+      <div class="craft-msg" id="craft-msg"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── NPC 對話框 ── -->
+<div id="dialog-box">
+  <div id="dialog-name">NPC</div>
+  <div id="dialog-text"></div>
+  <div id="dialog-opts"></div>
+</div>
+
+<!-- ── Item Tooltip ── -->
+<div id="item-tooltip"></div>
+
+<!-- ── 區域 HUD ── -->
+<div id="area-hud">
+  <div id="area-name"></div>
+  <div id="area-level"></div>
+  <div id="area-danger"></div>
+  <div id="hud-title"></div>
+  <div id="active-title" style="font-size:11px;color:#FFD700;text-align:right"></div>
+</div>
+
+<!-- ── 區域切換通知 ── -->
+<div id="area-notif"></div>
+
+<!-- ── 世界事件橫幅 ── -->
+<div id="event-bar"></div>
+
+<!-- ── 成就通知 ── -->
+<div id="ach-notif"></div>
+
+<!-- ── 城鎮提示 ── -->
+<div id="town-hint"></div>
+
+<!-- ── 倉庫面板 ── -->
+<div class="ui-overlay" id="warehouse-panel">
+  <div class="ui-panel" style="min-width:580px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">📦 城鎮倉庫</span>
+      <button class="ui-close" id="wh-close">✕</button>
+    </div>
+    <div class="ui-body">
+      <div style="font-size:11px;color:rgba(120,140,180,.5);margin-bottom:8px">點擊格子可將物品移至背包（需有空位）</div>
+      <div class="inv-grid" id="warehouse-grid" style="grid-template-columns:repeat(10,1fr)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 圖鑑面板 ── -->
+<div class="ui-overlay" id="bestiary-panel">
+  <div class="ui-panel" style="min-width:440px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">📖 怪物圖鑑</span>
+      <button class="ui-close" id="bestiary-close">✕</button>
+    </div>
+    <div class="ui-body">
+      <div id="bestiary-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 成就面板 ── -->
+<div class="ui-overlay" id="ach-panel">
+  <div class="ui-panel" style="min-width:440px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">🏆 成就系統</span>
+      <button class="ui-close" id="ach-close">✕</button>
+    </div>
+    <div class="ui-body">
+      <div id="ach-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 聲望面板 ── -->
+<div class="ui-overlay" id="rep-panel">
+  <div class="ui-panel" style="min-width:420px">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">⭐ 勢力聲望</span>
+      <button class="ui-close" id="rep-close">✕</button>
+    </div>
+    <div class="ui-body">
+      <div id="rep-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 任務委託面板 ── -->
+<div class="ui-overlay" id="quest-offer-panel" style="display:none">
+  <div class="ui-panel">
+    <div class="ui-panel-head">
+      <span class="ui-panel-title">📋 任務委託</span>
+      <span id="qo-npc-name"></span>
+      <button class="ui-close" id="qo-close">✕</button>
+    </div>
+    <div class="ui-body" style="padding:18px 20px">
+      <div id="qo-quest-title"></div>
+      <div id="qo-quest-desc"></div>
+      <div id="qo-quest-target"></div>
+      <div id="qo-quest-reward"></div>
+      <div style="display:flex;gap:12px;margin-top:18px">
+        <button class="dlg-btn" id="qo-accept" style="color:#88FF88;border-color:rgba(80,180,80,.4)">✅ 接受任務</button>
+        <button class="dlg-btn" id="qo-decline">❌ 謝絕</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 新手教學面板 ── -->
+<div id="tutorial-box">
+  <div id="tut-header">
+    <span id="tut-step-num">1 / 7</span>
+    <button id="tut-skip">跳過教學</button>
+  </div>
+  <div id="tut-icon-el">🎮</div>
+  <div id="tut-title-el">新手教學</div>
+  <div id="tut-msg-el"></div>
+  <button id="tut-next">已了解，繼續 →</button>
+</div>
+
+<!-- ══ Screens Overlay ══════════════════════════════════════════════ -->
+<div id="screens">
+
+  <!-- ── Title Screen ── -->
+  <div id="scr-title" class="g-screen active">
+    <div class="ttl-wrap">
+      <h1 class="ttl-main">魔法世界</h1>
+      <p class="ttl-sub">E N C H A N T E D &nbsp; W O R L D</p>
+      <div>
+        <button class="g-btn" id="btn-new-game">⚔ &nbsp;開始新遊戲</button>
+      </div>
+      <div>
+        <button class="g-btn" id="btn-continue" style="display:none">▶ &nbsp;繼續遊戲</button>
+      </div>
+      <p class="ttl-hint">選擇遊戲模式 ↑</p>
+    </div>
+    <span class="ttl-ver">v0.1 Alpha</span>
+  </div>
+
+  <!-- ── Character Creation Screen ── -->
+  <div id="scr-create" class="g-screen">
+    <h2 class="cr-title">✦ &nbsp;創建角色&nbsp; ✦</h2>
+    <div class="cr-layout">
+
+      <!-- Class cards -->
+      <div class="cls-list" id="cls-list">
+        <!-- Built by GameFlow.js -->
+      </div>
+
+      <!-- Detail + Name -->
+      <div class="cr-right">
+        <canvas id="cv-char" width="100" height="150"></canvas>
+        <div id="cls-detail">
+          <div class="cls-detail-name" id="cls-detail-name"></div>
+          <div class="cls-detail-desc" id="cls-detail-desc"></div>
+        </div>
+        <div class="stats-row" id="stats-row"></div>
+        <div class="cr-div"></div>
+        <div class="nm-area">
+          <span class="nm-lbl">角色名稱</span>
+          <input id="inp-name" type="text" maxlength="12" placeholder="輸入你的名稱…" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="g-btn" id="btn-enter" disabled>✦ &nbsp;進入世界&nbsp; ✦</button>
+      </div>
+
+    </div>
+    <div class="back-pos">
+      <button class="g-btn-sm" id="btn-back">← 返回</button>
+    </div>
+  </div>
+
+</div>
+<!-- ══ End Screens ══════════════════════════════════════════════════ -->
+
+<script src="pixi.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/ObjectPool.js"></script>
+<script src="js/shaders.js"></script>
+<script src="js/BiomeManager.js"></script>
+<script src="js/ChunkManager.js"></script>
+<script src="js/WorldManager.js"></script>
+<script src="js/SpawnManager.js"></script>
+<script src="js/Monster.js"></script>
+<script src="js/MonsterManager.js"></script>
+<script src="js/Combat.js"></script>
+<script src="js/SaveSystem.js"></script>
+<script src="js/CharacterRenderer.js"></script>
+<script src="js/Player.js"></script>
+<script src="js/EventBus.js"></script>
+<script src="js/ItemDatabase.js"></script>
+<script src="js/LevelSystem.js"></script>
+<script src="js/SkillSystem.js"></script>
+<script src="js/SkillEffect.js"></script>
+<script src="js/Minimap.js"></script>
+<script src="js/ItemQuality.js"></script>
+<script src="js/DropManager.js"></script>
+<script src="js/InventorySystem.js"></script>
+<script src="js/NPC.js"></script>
+<script src="js/NPCManager.js"></script>
+<script src="js/ShopSystem.js"></script>
+<script src="js/QuestDatabase.js"></script>
+<script src="js/QuestSystem.js"></script>
+<script src="js/GatherSystem.js"></script>
+<script src="js/BossSystem.js"></script>
+<script src="js/SkillTree.js"></script>
+<script src="js/CraftSystem.js"></script>
+<script src="js/TownSystem.js"></script>
+<script src="js/CitySystem.js"></script>
+<script src="js/TutorialSystem.js"></script>
+<script src="js/AreaSystem.js"></script>
+<script src="js/WorldEventSystem.js"></script>
+<script src="js/BestiarySystem.js"></script>
+<script src="js/AchievementSystem.js"></script>
+<script src="js/ReputationSystem.js"></script>
+<script src="js/GameFlow.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

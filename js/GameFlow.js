@@ -117,6 +117,7 @@
     var clsName = G.CLS_NAMES && G.CLS_NAMES[clsId];
     if (clsName) {
       var img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = function () {
         ctx.clearRect(0, 0, cv.width, cv.height);
         // Canvas 綠幕去背

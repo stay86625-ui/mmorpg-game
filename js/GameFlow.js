@@ -107,22 +107,55 @@
     '</div>';
   };
 
-  // ── 像素角色預覽 ──────────────────────────────────────────────────────────
+  // ── 角色預覽（優先顯示 webp 設計圖，fallback 像素） ─────────────────────
   GameFlow.prototype._drawPreview = function (clsId) {
     var cv  = this._cvChar;
     var ctx = cv.getContext('2d');
     ctx.clearRect(0, 0, cv.width, cv.height);
-    if (!G.makePixelChar) return;
-    var src = G.makePixelChar(clsId);       // 20×30
-    // 留邊距，等比縮放至畫布
-    var margin = 10;
-    var scaleW = (cv.width  - margin * 2) / src.width;
-    var scaleH = (cv.height - margin * 2) / src.height;
-    var sc = Math.min(scaleW, scaleH);
-    var ox = (cv.width  - src.width  * sc) / 2;
-    var oy = (cv.height - src.height * sc) / 2;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(src, ox, oy, src.width * sc, src.height * sc);
+
+    // 嘗試載入 webp 設計圖
+    var clsName = G.CLS_NAMES && G.CLS_NAMES[clsId];
+    if (clsName) {
+      var img = new Image();
+      img.onload = function () {
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        // Canvas 綠幕去背
+        var tmp = document.createElement('canvas');
+        tmp.width = img.naturalWidth; tmp.height = img.naturalHeight;
+        var tc  = tmp.getContext('2d');
+        tc.drawImage(img, 0, 0);
+        var d = tc.getImageData(0, 0, tmp.width, tmp.height), px = d.data;
+        for (var i = 0; i < px.length; i += 4) {
+          var r = px[i]/255, g = px[i+1]/255, b = px[i+2]/255;
+          var ge = g - Math.max(r, b) * 0.85;
+          var t  = ge < 0.20 ? 0 : ge > 0.48 ? 1 : (ge - 0.20) / 0.28;
+          px[i+3] = Math.round(px[i+3] * (1 - t));
+        }
+        tc.putImageData(d, 0, 0);
+        // 裁切 body 區域（設計圖左側站姿）
+        var sx = Math.round(0.04 * tmp.width),  sy = Math.round(0.07 * tmp.height);
+        var sw = Math.round(0.42 * tmp.width),  sh = Math.round(0.84 * tmp.height);
+        var margin = 8;
+        var sc = Math.min((cv.width - margin*2) / sw, (cv.height - margin*2) / sh);
+        var ox = (cv.width  - sw * sc) / 2;
+        var oy = (cv.height - sh * sc) / 2;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(tmp, sx, sy, sw, sh, ox, oy, sw * sc, sh * sc);
+      };
+      img.onerror = function () { _pixelFallback(); };
+      img.src = 'assets/characters/' + clsName + '.webp';
+      return;
+    }
+
+    function _pixelFallback() {
+      if (!G.makePixelChar) return;
+      var src = G.makePixelChar(clsId);
+      var margin = 10;
+      var sc = Math.min((cv.width - margin*2) / src.width, (cv.height - margin*2) / src.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(src, (cv.width - src.width*sc)/2, (cv.height - src.height*sc)/2, src.width*sc, src.height*sc);
+    }
+    _pixelFallback();
   };
 
   // ── 事件繫結 ──────────────────────────────────────────────────────────────

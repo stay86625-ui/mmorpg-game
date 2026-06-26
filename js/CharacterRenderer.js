@@ -3,7 +3,7 @@
 
   var ANIM = { IDLE: 0, WALK: 1, CAST: 2, HURT: 3, DIE: 4 };
 
-  // ── GLSL 綠幕濾鏡（作為 canvas 去背失敗時的 fallback）────────────────────
+  // ── GLSL 綠幕移除濾鏡（GPU 執行，無 Canvas 安全限制）──────────────────────
   var CHROMA_FRAG = [
     'precision mediump float;',
     'varying vec2 vTextureCoord;',
@@ -11,7 +11,7 @@
     'void main(){',
     '  vec4 c = texture2D(uSampler, vTextureCoord);',
     '  float g = c.g - max(c.r, c.b) * 0.85;',
-    '  float a = c.a * (1.0 - smoothstep(0.20, 0.48, g));',
+    '  float a = c.a * (1.0 - smoothstep(0.15, 0.45, g));',
     '  gl_FragColor = vec4(c.rgb * a, a);',
     '}',
   ].join('\n');
@@ -21,41 +21,19 @@
     return _sharedFilter;
   }
 
-  // ── Canvas 綠幕去背（一次性在 CPU 處理，結果烘焙進 BaseTexture）────────────
-  // 比 GLSL 濾鏡更省 GPU，也不需要 CORS filter 掛載
-  function _chromaKeyCanvas(img) {
-    var w  = img.naturalWidth, h = img.naturalHeight;
-    var cv = document.createElement('canvas');
-    cv.width = w; cv.height = h;
-    var ctx = cv.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    var d  = ctx.getImageData(0, 0, w, h);
-    var px = d.data;
-    for (var i = 0; i < px.length; i += 4) {
-      var r = px[i] / 255, g = px[i+1] / 255, b = px[i+2] / 255;
-      // 與 GLSL 版本相同的公式：綠色超出量 → alpha 衰減
-      var ge = g - Math.max(r, b) * 0.85;
-      var t  = ge < 0.20 ? 0 : ge > 0.48 ? 1 : (ge - 0.20) / 0.28;
-      px[i+3] = Math.round(px[i+3] * (1 - t));
-    }
-    ctx.putImageData(d, 0, 0);
-    return cv;
-  }
-
-  // ── 設計圖各部件裁切區域（標準化 0-1，基於 5 張設計圖共用的版面配置）──────
-  //   設計圖版面：
-  //     左側：完整站姿參考（主要角色）
-  //     頂列：3 款髮型變體（取第 3 款 = 最飄逸）
-  //     右側上方：右臂+武器（上舉施法 / 下垂普通 / 左臂）
-  //     底部左：披風尾段
+  // ── 設計圖各部件裁切區域（標準化 0-1）────────────────────────────────────
+  // 版面說明：
+  //   左側 (x:4%~46%, y:17%~96%): 完整站姿角色（主角色，y 要從 17% 開始避開散件頭部）
+  //   頂列散件 (y:0~14%): 3 款頭髮、肩甲 → 不包含在 body crop
+  //   右側 (x:53%~70%): 右臂、左臂
+  //   底部左 (x:2%~20%, y:74%~99%): 披風下擺
   var SHEET = {
-    body:  [0.04, 0.07, 0.42, 0.84],   // 完整站姿（主 body sprite）
-    hair:  [0.28, 0.005, 0.14, 0.135], // 第 3 款髮型（最長最飄）
-    armHi: [0.53, 0.12,  0.16, 0.16],  // 右臂+武器（上舉姿勢，施法用）
-    cape:  [0.025, 0.745, 0.18, 0.25], // 披風/斗篷下擺
+    body:  [0.04, 0.17, 0.38, 0.79],   // 完整站姿（從 17% 開始，跳過頂部散件）
+    hair:  [0.28, 0.005, 0.14, 0.135], // 第 3 款髮型（最飄）
+    armHi: [0.53, 0.12,  0.16, 0.16],  // 右臂+武器上舉（施法用）
+    cape:  [0.025, 0.745, 0.18, 0.25], // 披風下擺
   };
 
-  // 從 BaseTexture 建立指定部件的 PIXI.Texture
   function _mkTex(bt, key) {
     var r  = SHEET[key];
     var iw = bt.width, ih = bt.height;
@@ -76,56 +54,43 @@
     this._H        = displayH || 90;
 
     var H   = this._H;
-    // 統一縮放：設計圖 body 區段高度 → displayH
     var usc = H / (SHEET.body[3] * bt.height);
     this._usc = usc;
 
-    // bt 是否已 canvas 去背（CanvasResource），還是原始 URL 圖片（需要 GLSL filter）
-    var needFilter = !(bt.resource && bt.resource.source instanceof HTMLCanvasElement);
-    var cf = needFilter ? _cf() : null;
+    var cf = _cf();
 
-    // 輔助：建立部件 sprite
     function mkSp(key, ancX, ancY) {
       var sp = new PIXI.Sprite(_mkTex(bt, key));
       sp.anchor.set(ancX, ancY);
       sp.scale.set(usc);
-      if (cf) sp.filters = [cf];
+      sp.filters = [cf];
       return sp;
     }
 
-    // ── 背景特效層（在所有 sprite 後面）────────────────────────────────────
     this._aura = new PIXI.Graphics();
     this.container.addChild(this._aura);
 
-    // ── 披風下擺（在 body 後面）─────────────────────────────────────────────
-    //    錨點：(0.5, 0.05) ≈ 上端中央連接腰部
-    //    位置：腰部 y ≈ -H*0.40
+    // 披風（body 後面）
     this._capeSp = mkSp('cape', 0.5, 0.05);
     this._capeSp.position.set(0, -H * 0.40);
     this.container.addChild(this._capeSp);
 
-    // ── 主 body（完整站姿參考圖）───────────────────────────────────────────
-    //    錨點：(0.5, 1.0) = 底部中央（腳底）
+    // 主 body
     this.sprite = mkSp('body', 0.5, 1.0);
     this._baseScale = usc;
     this.container.addChild(this.sprite);
 
-    // ── 上舉右臂（施法時顯示，蓋在 body 上面）──────────────────────────────
-    //    錨點：(0.12, 0.05) ≈ 肩關節位置（臂部圖左上角附近）
-    //    位置：右肩 x≈+H*0.15, y≈-H*0.70
+    // 上舉手臂（施法）
     this._armSp = mkSp('armHi', 0.12, 0.05);
     this._armSp.position.set(H * 0.15, -H * 0.70);
     this._armSp.visible = false;
     this.container.addChild(this._armSp);
 
-    // ── 頭髮覆蓋層（在最前面）─────────────────────────────────────────────
-    //    錨點：(0.5, 1.0) = 底部（髮根位置對齊頭頂）
-    //    位置：頭頂 y ≈ -H*0.86
+    // 頭髮覆蓋層
     this._hairSp = mkSp('hair', 0.5, 1.0);
     this._hairSp.position.set(0, -H * 0.86);
     this.container.addChild(this._hairSp);
 
-    // ── 前景特效層 ─────────────────────────────────────────────────────────
     this._fx = new PIXI.Graphics();
     this.container.addChild(this._fx);
   }
@@ -134,8 +99,7 @@
     if (this.state === ANIM.DIE) return;
     if (state === ANIM.HURT && this.state !== ANIM.HURT) this.hurtTimer = 0.32;
     if (state !== this.state && this.state === ANIM.CAST) {
-      this._aura.clear();
-      this._fx.clear();
+      this._aura.clear(); this._fx.clear();
     }
     this.state = state;
   };
@@ -144,13 +108,11 @@
     if (this.facing === f) return;
     this.facing = f;
     var usc = this._usc;
-    // 翻轉 body / hair / cape（X 軸縮放取反）
     this.sprite.scale.x  = f * usc;
     this._hairSp.scale.x = f * usc;
     this._capeSp.scale.x = f * usc;
-    // 翻轉手臂並移到對應肩膀
-    this._armSp.scale.x    = f * usc;
-    this._armSp.position.x = f * this._H * 0.15;
+    this._armSp.scale.x     = f * usc;
+    this._armSp.position.x  = f * this._H * 0.15;
   };
 
   Character.prototype.update = function (dt) {
@@ -166,22 +128,19 @@
     var H   = this._H;
     var usc = this._usc;
 
-    // ── 每幀重置 ──────────────────────────────────────────────────────────
     sp.rotation = 0; sp.tint = 0xFFFFFF; sp.alpha = 1; sp.y = 0;
     sp.scale.set(f * usc, usc);
-    this._armSp.visible    = false;
-    this._hairSp.alpha     = 1;  this._capeSp.alpha = 1;
-    this._hairSp.rotation  = 0;  this._capeSp.rotation = 0;
-    this._hairSp.y         = -H * 0.86;
-    this._aura.clear();
-    this._fx.clear();
+    this._armSp.visible   = false;
+    this._hairSp.alpha    = 1; this._capeSp.alpha = 1;
+    this._hairSp.rotation = 0; this._capeSp.rotation = 0;
+    this._hairSp.y = -H * 0.86;
+    this._aura.clear(); this._fx.clear();
 
     switch (this.state) {
 
-      // ── 待機：呼吸浮動 + 頭髮輕晃 + 披風輕飄 ────────────────────────
       case ANIM.IDLE: {
         var breath = Math.sin(t * 1.5) * 2.2;
-        sp.y       = breath;
+        sp.y = breath;
         sp.scale.y = usc * (1 + Math.sin(t * 1.5) * 0.009);
         this._hairSp.y        = -H * 0.86 + breath;
         this._hairSp.rotation = Math.sin(t * 2.0) * 0.045;
@@ -189,9 +148,8 @@
         break;
       }
 
-      // ── 走路：身體上下彈跳 + 頭髮向後飄 + 披風拖拽 ──────────────────
       case ANIM.WALK: {
-        var wp  = t * 7.0;
+        var wp = t * 7.0;
         sp.y        = Math.abs(Math.sin(wp)) * (-5);
         sp.rotation = f * Math.sin(wp) * 0.028;
         this._hairSp.y        = -H * 0.86 + sp.y;
@@ -200,30 +158,24 @@
         break;
       }
 
-      // ── 施法：舉起武器臂 + 身體後仰 + 法力光環 + 粒子效果 ───────────
       case ANIM.CAST: {
         sp.y        = -5;
         sp.rotation = -f * 0.08;
         sp.tint     = 0xDDCCFF;
-        // 顯示上舉武器臂部件
         this._armSp.visible  = true;
         this._armSp.rotation = Math.sin(t * 2.5) * 0.06 - 0.18;
-        // 頭髮因魔力衝擊稍微揚起
         this._hairSp.y        = -H * 0.86 + sp.y;
         this._hairSp.rotation = f * 0.09 + Math.sin(t * 3.0) * 0.04;
-        // 脈衝法力光環（_aura 在 sprite 後面）
         var pulse  = (t % 0.6) / 0.6;
         var pAlpha = (1 - pulse) * 0.40;
         var pR     = 18 + pulse * 22;
         this._aura.beginFill(0x8844FF, pAlpha * 0.5).drawEllipse(0, -H*0.5, pR, pR*0.55).endFill();
         this._aura.lineStyle(2, 0xAA66FF, pAlpha).drawEllipse(0, -H*0.5, pR, pR*0.55).lineStyle(0);
         this._aura.beginFill(0x6622CC, 0.18).drawEllipse(0, -H*0.5, 14, 8).endFill();
-        // 武器前端光點（_fx 在 sprite 前面）
         var tipX = f * H * 0.20, tipY = -H * 0.65;
         this._fx.beginFill(0xFFFFFF, 0.90).drawCircle(tipX, tipY, 4).endFill();
         this._fx.beginFill(0xAA88FF, 0.55).drawCircle(tipX, tipY, 8).endFill();
         this._fx.beginFill(0x6644FF, 0.22).drawCircle(tipX, tipY, 14).endFill();
-        // 旋轉魔法粒子
         for (var pi = 0; pi < 5; pi++) {
           var ang = t * 3.0 + pi * 1.2566;
           var pr  = 12 + Math.sin(t * 2 + pi) * 3;
@@ -234,7 +186,6 @@
         break;
       }
 
-      // ── 受傷：白閃紅閃 + 身體後仰 + 衝擊波 ─────────────────────────
       case ANIM.HURT: {
         sp.tint     = Math.floor(this.hurtTimer * 18) % 2 ? 0xFFFFFF : 0xFF6666;
         sp.y        = -8;
@@ -250,7 +201,6 @@
         break;
       }
 
-      // ── 死亡：緩慢旋轉倒下 + 淡出 + 地面漣漪 ───────────────────────
       case ANIM.DIE: {
         this.dieTimer  += dt;
         var dieF        = Math.min(this.dieTimer / 1.5, 1);
@@ -270,48 +220,40 @@
     }
   };
 
-  // ── 材質載入 ────────────────────────────────────────────────────────────
-  // 流程：new Image() → Canvas 去背 → PIXI.BaseTexture.from(canvas)
-  // 回傳 { name: BaseTexture }，每張圖的綠幕已在載入時一次性 CPU 處理完畢
+  // ── 材質載入：PIXI 直接從 URL 載入（GitHub Pages 同源 HTTPS，無 CORS 問題）──
   function loadTextures(basePath, onDone) {
     var names  = ['法師', '劍士', '弓箭手', '刺客', '伊格'];
     var result = {};
     var remain = names.length;
     names.forEach(function (name) {
-      var img = new Image();
-      // crossOrigin='anonymous' 防止 canvas 被 taint（GitHub Pages 有 CORS header）
-      img.crossOrigin = 'anonymous';
-      img.onload = function () {
-        try {
-          var canvas = _chromaKeyCanvas(img);            // 去背
-          var bt     = PIXI.BaseTexture.from(canvas);   // 建立材質
-          result[name] = bt;
-          console.log('[CR] loaded: ' + name + ' ' + bt.width + 'x' + bt.height);
-        } catch (e) {
-          console.warn('[CR] canvas fail ' + name + ': ' + e);
-          // fallback: 直接用 img 建立（保留綠幕，透過 GLSL filter 去背）
-          result[name] = PIXI.BaseTexture.from(img);
-        }
+      var bt = PIXI.BaseTexture.from(basePath + name + '.webp');
+      function done() {
+        result[name] = bt;
+        console.log('[CR] loaded: ' + name + ' ' + bt.width + 'x' + bt.height);
         if (--remain === 0) onDone(result);
-      };
-      img.onerror = function () {
-        console.warn('[CR] 無法載入: ' + name);
-        if (--remain === 0) onDone(result);
-      };
-      img.src = basePath + name + '.webp';
+      }
+      if (bt.valid) {
+        done();
+      } else {
+        bt.on('loaded', done);
+        bt.on('error', function () {
+          console.warn('[CR] 無法載入: ' + name);
+          if (--remain === 0) onDone(result);
+        });
+      }
     });
   }
 
-  // ── 建立 Character 實例 ───────────────────────────────────────────────────
   function create(clsName, textures, displayH) {
     var bt = textures[clsName];
-    if (!bt || !bt.valid) return null;
+    if (!bt) { console.warn('[CR] create: no bt for ' + clsName); return null; }
+    if (!bt.valid) { console.warn('[CR] create: bt not valid for ' + clsName); return null; }
     return new Character(bt, displayH || 90);
   }
 
   G.CharacterRenderer = {
     ANIM        : ANIM,
-    CROP        : SHEET.body,   // 向下相容（給外部參考用）
+    CROP        : SHEET.body,
     loadTextures: loadTextures,
     create      : create,
   };

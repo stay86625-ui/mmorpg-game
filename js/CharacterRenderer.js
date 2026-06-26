@@ -3,22 +3,25 @@
 
   var ANIM = { IDLE: 0, WALK: 1, CAST: 2, HURT: 3, DIE: 4 };
 
-  // ── 綠幕移除濾鏡（共享）────────────────────────────────────────────────────
-  var CHROMA_FRAG = [
-    'precision mediump float;',
-    'varying vec2 vTextureCoord;',
-    'uniform sampler2D uSampler;',
-    'void main(){',
-    '  vec4 c = texture2D(uSampler, vTextureCoord);',
-    '  float g = c.g - max(c.r, c.b) * 0.85;',
-    '  float a = c.a * (1.0 - smoothstep(0.20, 0.48, g));',
-    '  gl_FragColor = vec4(c.rgb * a, a);',
-    '}',
-  ].join('\n');
-  var _sharedFilter = null;
-  function _cf() {
-    if (!_sharedFilter) _sharedFilter = new PIXI.Filter(null, CHROMA_FRAG, {});
-    return _sharedFilter;
+  // ── Canvas 綠幕去背（一次性在 CPU 處理，結果烘焙進 BaseTexture）────────────
+  // 比 GLSL 濾鏡更省 GPU，也不需要 CORS filter 掛載
+  function _chromaKeyCanvas(img) {
+    var w  = img.naturalWidth, h = img.naturalHeight;
+    var cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    var d  = ctx.getImageData(0, 0, w, h);
+    var px = d.data;
+    for (var i = 0; i < px.length; i += 4) {
+      var r = px[i] / 255, g = px[i+1] / 255, b = px[i+2] / 255;
+      // 與 GLSL 版本相同的公式：綠色超出量 → alpha 衰減
+      var ge = g - Math.max(r, b) * 0.85;
+      var t  = ge < 0.20 ? 0 : ge > 0.48 ? 1 : (ge - 0.20) / 0.28;
+      px[i+3] = Math.round(px[i+3] * (1 - t));
+    }
+    ctx.putImageData(d, 0, 0);
+    return cv;
   }
 
   // ── 設計圖各部件裁切區域（標準化 0-1，基於 5 張設計圖共用的版面配置）──────
@@ -59,14 +62,11 @@
     var usc = H / (SHEET.body[3] * bt.height);
     this._usc = usc;
 
-    var cf = _cf();
-
-    // 輔助：建立部件 sprite
+    // 輔助：建立部件 sprite（去背已在 bt 烘焙完成，不需要 filter）
     function mkSp(key, ancX, ancY) {
       var sp = new PIXI.Sprite(_mkTex(bt, key));
       sp.anchor.set(ancX, ancY);
       sp.scale.set(usc);
-      sp.filters = [cf];
       return sp;
     }
 
@@ -247,26 +247,30 @@
     }
   };
 
-  // ── 材質載入（用 new Image() 繞過 file:// CORS 限制）────────────────────
-  // 回傳 { name: PIXI.BaseTexture } 供 Character 建立多個部件貼圖
+  // ── 材質載入 ────────────────────────────────────────────────────────────
+  // 流程：new Image() → Canvas 去背 → PIXI.BaseTexture.from(canvas)
+  // 回傳 { name: BaseTexture }，每張圖的綠幕已在載入時一次性 CPU 處理完畢
   function loadTextures(basePath, onDone) {
     var names  = ['法師', '劍士', '弓箭手', '刺客', '伊格'];
     var result = {};
     var remain = names.length;
     names.forEach(function (name) {
-      var img   = new Image();
-      var url   = basePath + name + '.webp';
+      var img = new Image();
       img.onload = function () {
-        // 從已載入的 HTMLImageElement 建立 BaseTexture（不觸發 XHR，無 CORS）
-        var bt = PIXI.BaseTexture.from(img);
-        result[name] = bt;
+        try {
+          var canvas = _chromaKeyCanvas(img);            // 去背
+          var bt     = PIXI.BaseTexture.from(canvas);   // 建立材質
+          result[name] = bt;
+        } catch (e) {
+          console.warn('[CharacterRenderer] canvas 處理失敗 ' + name + ': ' + e);
+        }
         if (--remain === 0) onDone(result);
       };
       img.onerror = function () {
         console.warn('[CharacterRenderer] 無法載入: ' + name);
         if (--remain === 0) onDone(result);
       };
-      img.src = url;
+      img.src = basePath + name + '.webp';
     });
   }
 

@@ -126,10 +126,22 @@
         var tc  = tmp.getContext('2d');
         tc.drawImage(img, 0, 0);
         var d = tc.getImageData(0, 0, tmp.width, tmp.height), px = d.data;
+        var W2 = tmp.width, H2 = tmp.height;
+        // 從四個角落取樣背景色（自動偵測各角色的綠幕色）
+        var corners = [
+          0, (W2-1)*4,
+          (H2-1)*W2*4, ((H2-1)*W2 + W2-1)*4,
+        ];
+        var bgR=0, bgG=0, bgB=0;
+        for (var ci=0; ci<corners.length; ci++) {
+          bgR += px[corners[ci]]; bgG += px[corners[ci]+1]; bgB += px[corners[ci]+2];
+        }
+        bgR /= corners.length; bgG /= corners.length; bgB /= corners.length;
+        // 對每個像素計算與背景的顏色距離，距離越近越透明
         for (var i = 0; i < px.length; i += 4) {
-          var r = px[i]/255, g = px[i+1]/255, b = px[i+2]/255;
-          var ge = g - Math.max(r, b) * 0.85;
-          var t  = ge < 0.15 ? 0 : ge > 0.38 ? 1 : (ge - 0.15) / 0.23;
+          var dr = px[i]-bgR, dg = px[i+1]-bgG, db = px[i+2]-bgB;
+          var dist = Math.sqrt(dr*dr + dg*dg + db*db); // 0~441
+          var t = dist < 55 ? 1 : dist > 130 ? 0 : (130 - dist) / 75;
           px[i+3] = Math.round(px[i+3] * (1 - t));
         }
         tc.putImageData(d, 0, 0);

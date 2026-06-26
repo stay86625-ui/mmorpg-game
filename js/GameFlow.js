@@ -129,13 +129,13 @@
         for (var i = 0; i < px.length; i += 4) {
           var r = px[i]/255, g = px[i+1]/255, b = px[i+2]/255;
           var ge = g - Math.max(r, b) * 0.85;
-          var t  = ge < 0.20 ? 0 : ge > 0.48 ? 1 : (ge - 0.20) / 0.28;
+          var t  = ge < 0.15 ? 0 : ge > 0.38 ? 1 : (ge - 0.15) / 0.23;
           px[i+3] = Math.round(px[i+3] * (1 - t));
         }
         tc.putImageData(d, 0, 0);
-        // 裁切 body 區域（設計圖左側站姿）
-        var sx = Math.round(0.04 * tmp.width),  sy = Math.round(0.07 * tmp.height);
-        var sw = Math.round(0.42 * tmp.width),  sh = Math.round(0.84 * tmp.height);
+        // 裁切 body 區域：從 y=17% 開始，跳過頂部散件（頭髮/肩甲 y:0~14%）
+        var sx = Math.round(0.06 * tmp.width),  sy = Math.round(0.17 * tmp.height);
+        var sw = Math.round(0.36 * tmp.width),  sh = Math.round(0.78 * tmp.height);
         var margin = 8;
         var sc = Math.min((cv.width - margin*2) / sw, (cv.height - margin*2) / sh);
         var ox = (cv.width  - sw * sc) / 2;

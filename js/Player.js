@@ -113,18 +113,26 @@
 
   Player.prototype._applyWebpClass = function (cls) {
     if (!this._charTexs) return;
+    if (!CLS_NAMES) { console.warn('[Player] G.CLS_NAMES 未定義'); return; }
     var name = CLS_NAMES[cls];
-    var CR   = G.CharacterRenderer;
-    var ch   = CR.create(name, this._charTexs, 90);
-    if (!ch) return; // 沒有對應材質，保留目前 sprite
+    if (!name) { console.warn('[Player] 找不到職業名: cls=' + cls); return; }
+    var CR = G.CharacterRenderer;
+    var ch = CR.create(name, this._charTexs, 90);
+    if (!ch) return; // 材質還未就緒，保留目前 sprite
 
-    // 把舊 sprite 從父節點移除
-    if (this.sprite && this.sprite.parent) this.sprite.parent.removeChild(this.sprite);
+    // 記住舊 sprite 在 stage 的位置，移除後在同一層插入新 sprite
+    var oldParent = this.sprite ? this.sprite.parent : null;
+    var oldIdx    = oldParent ? oldParent.getChildIndex(this.sprite) : -1;
+    if (oldParent) oldParent.removeChild(this.sprite);
 
     this.character = ch;
     this.sprite    = ch.container;
-    // 把新 container 加回 stage（由 main.js 負責插回正確層次）
-    this.sprite._needsAddToStage = true;
+
+    if (oldParent && oldIdx >= 0) {
+      oldParent.addChildAt(this.sprite, oldIdx);   // 直接插回同一層同一深度
+    } else {
+      this.sprite._needsAddToStage = true;          // 首次初始化：由 loadTextures 回調插入
+    }
   };
 
   Player.prototype.takeDamage = function (dmg) {

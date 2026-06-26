@@ -3,15 +3,18 @@
 
   var ANIM = { IDLE: 0, WALK: 1, CAST: 2, HURT: 3, DIE: 4 };
 
-  // ── GLSL 綠幕移除濾鏡（GPU 執行，無 Canvas 安全限制）──────────────────────
+  // ── GLSL 綠幕移除濾鏡（以 min(overR, overB) 判斷，適應各種深淺綠）──────
   var CHROMA_FRAG = [
     'precision mediump float;',
     'varying vec2 vTextureCoord;',
     'uniform sampler2D uSampler;',
     'void main(){',
     '  vec4 c = texture2D(uSampler, vTextureCoord);',
-    '  float g = c.g - max(c.r, c.b) * 0.85;',
-    '  float a = c.a * (1.0 - smoothstep(0.15, 0.45, g));',
+    '  float overR = c.g - c.r;',          // 綠超出紅的量
+    '  float overB = c.g - c.b;',          // 綠超出藍的量
+    '  float greenness = min(overR, overB);', // 兩者都要超過才算綠幕
+    '  float t = smoothstep(0.12, 0.32, greenness);',
+    '  float a = c.a * (1.0 - t);',
     '  gl_FragColor = vec4(c.rgb * a, a);',
     '}',
   ].join('\n');
@@ -250,6 +253,9 @@
     if (!bt.valid) { console.warn('[CR] create: bt not valid for ' + clsName); return null; }
     return new Character(bt, displayH || 90);
   }
+
+  // 職業 ID → 材質檔名（Player.js / main.js / GameFlow.js 都用到）
+  G.CLS_NAMES = ['法師', '劍士', '弓箭手', '伊格', '刺客'];
 
   G.CharacterRenderer = {
     ANIM        : ANIM,

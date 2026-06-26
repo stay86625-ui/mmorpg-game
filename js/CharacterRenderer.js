@@ -3,6 +3,24 @@
 
   var ANIM = { IDLE: 0, WALK: 1, CAST: 2, HURT: 3, DIE: 4 };
 
+  // ── GLSL 綠幕濾鏡（作為 canvas 去背失敗時的 fallback）────────────────────
+  var CHROMA_FRAG = [
+    'precision mediump float;',
+    'varying vec2 vTextureCoord;',
+    'uniform sampler2D uSampler;',
+    'void main(){',
+    '  vec4 c = texture2D(uSampler, vTextureCoord);',
+    '  float g = c.g - max(c.r, c.b) * 0.85;',
+    '  float a = c.a * (1.0 - smoothstep(0.20, 0.48, g));',
+    '  gl_FragColor = vec4(c.rgb * a, a);',
+    '}',
+  ].join('\n');
+  var _sharedFilter = null;
+  function _cf() {
+    if (!_sharedFilter) _sharedFilter = new PIXI.Filter(null, CHROMA_FRAG, {});
+    return _sharedFilter;
+  }
+
   // ── Canvas 綠幕去背（一次性在 CPU 處理，結果烘焙進 BaseTexture）────────────
   // 比 GLSL 濾鏡更省 GPU，也不需要 CORS filter 掛載
   function _chromaKeyCanvas(img) {
@@ -62,11 +80,16 @@
     var usc = H / (SHEET.body[3] * bt.height);
     this._usc = usc;
 
-    // 輔助：建立部件 sprite（去背已在 bt 烘焙完成，不需要 filter）
+    // bt 是否已 canvas 去背（CanvasResource），還是原始 URL 圖片（需要 GLSL filter）
+    var needFilter = !(bt.resource && bt.resource.source instanceof HTMLCanvasElement);
+    var cf = needFilter ? _cf() : null;
+
+    // 輔助：建立部件 sprite
     function mkSp(key, ancX, ancY) {
       var sp = new PIXI.Sprite(_mkTex(bt, key));
       sp.anchor.set(ancX, ancY);
       sp.scale.set(usc);
+      if (cf) sp.filters = [cf];
       return sp;
     }
 
@@ -256,18 +279,23 @@
     var remain = names.length;
     names.forEach(function (name) {
       var img = new Image();
+      // crossOrigin='anonymous' 防止 canvas 被 taint（GitHub Pages 有 CORS header）
+      img.crossOrigin = 'anonymous';
       img.onload = function () {
         try {
           var canvas = _chromaKeyCanvas(img);            // 去背
           var bt     = PIXI.BaseTexture.from(canvas);   // 建立材質
           result[name] = bt;
+          console.log('[CR] loaded: ' + name + ' ' + bt.width + 'x' + bt.height);
         } catch (e) {
-          console.warn('[CharacterRenderer] canvas 處理失敗 ' + name + ': ' + e);
+          console.warn('[CR] canvas fail ' + name + ': ' + e);
+          // fallback: 直接用 img 建立（保留綠幕，透過 GLSL filter 去背）
+          result[name] = PIXI.BaseTexture.from(img);
         }
         if (--remain === 0) onDone(result);
       };
       img.onerror = function () {
-        console.warn('[CharacterRenderer] 無法載入: ' + name);
+        console.warn('[CR] 無法載入: ' + name);
         if (--remain === 0) onDone(result);
       };
       img.src = basePath + name + '.webp';
